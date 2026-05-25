@@ -95,4 +95,36 @@ export type InterpreterResponse = {
     overrides: Overrides;
     scope: 'selected' | 'global';
     deltas: InterpreterDelta[];
+    screen?: UIScreenDelta;
+};
+
+export type UIComponentType =
+    | 'card' | 'button' | 'input' | 'panel' | 'badge' | 'table'
+    | 'exception-queue' | 'audit-trail' | 'approval-chain' | 'stat-row'
+    | 'patient-summary' | 'medication-list' | 'care-timeline' | 'vitals-bar'
+    | 'position-grid' | 'metric-ticker' | 'risk-gauge' | 'order-entry';
+
+export type UISlot = {
+    id: string;
+    label: string;
+    componentType: UIComponentType;
+    surface?: ConstraintContext['surface'];
+    state?: ConstraintContext['state'];
+    data: Record<string, unknown>;
+};
+
+export type UIRegion = {
+    id: string;
+    layout: 'stack' | 'grid-2' | 'grid-3' | 'row';
+    slots: UISlot[];
+};
+
+export type UIScreen = {
+    projectId: string;
+    title: string;
+    regions: UIRegion[];
+};
+
+export type UIScreenDelta = {
+    regions?: UIRegion[];
 };

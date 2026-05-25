@@ -4,9 +4,12 @@ import { useMemo, useState } from 'react';
 import { materialize, palette } from '@/lib/frame/materializer';
 import {
     buildRuleset,
+    componentTypeToContext,
     defaultPersonaForProject,
+    mergeScreenDelta,
     personae,
     personaeForProject,
+    projectScreens,
     projects,
     validPersonaForProject,
 } from '@/lib/frame/presets';
@@ -15,10 +18,15 @@ import type {
     ComponentResolution,
     ConstraintContext,
     InterpreterResponse,
+    MaterializedTokens,
     Overrides,
     Rule,
     TokenName,
     TokenValue,
+    UIRegion,
+    UIScreen,
+    UIScreenDelta,
+    UISlot,
 } from '@/lib/frame/types';
 
 type WorkspaceState = {
@@ -28,6 +36,7 @@ type WorkspaceState = {
     density: 'compact' | 'comfortable' | 'spacious';
     viewMode: 'screen' | 'gallery';
     selected: string | null;
+    screen: UIScreen;
 };
 
 type ChatMessage = {
@@ -73,6 +82,7 @@ export default function Frame() {
         density: 'compact',
         viewMode: 'screen',
         selected: null,
+        screen: projectScreens.enterprise,
     });
     const [overrides, setOverrides] = useState<Record<string, Overrides>>({});
     const [history, setHistory] = useState<ChatMessage[]>([]);
@@ -92,6 +102,10 @@ export default function Frame() {
 
     function patchState(patch: Partial<WorkspaceState>) {
         setState((current) => ({ ...current, ...patch }));
+    }
+
+    function resetOverrides() {
+        setOverrides({});
     }
 
     function setOverride(token: TokenName, value: TokenValue | undefined) {
@@ -173,6 +187,14 @@ export default function Frame() {
                 ...current,
                 [target]: { ...(current[target] ?? {}), ...data.overrides },
             }));
+
+            if (data.screen) {
+                setState((current) => ({
+                    ...current,
+                    screen: mergeScreenDelta(current.screen, data.screen as UIScreenDelta, current.project),
+                }));
+            }
+
             setHistory((current) =>
                 current.concat({
                     role: 'assistant',
@@ -197,7 +219,7 @@ export default function Frame() {
         <>
             <Head title="Frame" />
             <div className="grid h-screen grid-cols-[296px_1fr_340px] grid-rows-[44px_1fr_202px] overflow-hidden bg-zinc-50 text-[13px] text-zinc-950 dark:bg-zinc-950 dark:text-zinc-50">
-                <Topbar state={state} patchState={patchState} />
+                <Topbar state={state} patchState={patchState} resetOverrides={resetOverrides} />
                 <ChatPane history={history} busy={busy} selected={selected} sendIntent={sendIntent} />
                 <Viewport
                     state={state}
@@ -223,9 +245,11 @@ export default function Frame() {
 function Topbar({
     state,
     patchState,
+    resetOverrides,
 }: {
     state: WorkspaceState;
     patchState: (patch: Partial<WorkspaceState>) => void;
+    resetOverrides: () => void;
 }) {
     return (
         <div className="col-span-3 flex items-center gap-3 border-b border-zinc-200 bg-white px-3 dark:border-zinc-800 dark:bg-zinc-900">
@@ -245,12 +269,14 @@ function Topbar({
                 }))}
                 onChange={(project) => {
                     const ambient = projects[project as keyof typeof projects].ambient;
+                    resetOverrides();
                     patchState({
                         project: project as WorkspaceState['project'],
                         persona: defaultPersonaForProject(project),
                         previewMode: ambient.mode as WorkspaceState['previewMode'],
                         density: ambient.density as WorkspaceState['density'],
                         selected: null,
+                        screen: projectScreens[project as keyof typeof projects],
                     });
                 }}
             />
@@ -407,7 +433,6 @@ function Viewport({
     select: (id: string | null) => void;
 }) {
     const pal = palette(state.previewMode, state.project);
-    const items = getPreviewItems(state.project, state.viewMode);
     const project = projects[state.project];
     const frameClass =
         state.project === 'fintech'
@@ -418,6 +443,9 @@ function Viewport({
     const framePadding =
         state.project === 'fintech' ? 16 : state.project === 'healthcare' ? 32 : 24;
 
+    // In gallery mode, flatten all slots from all regions
+    const allSlots = state.screen.regions.flatMap((r) => r.slots);
+
     return (
         <main
             className="row-start-2 min-h-0 overflow-auto bg-[radial-gradient(circle,theme(colors.zinc.300)_1px,transparent_1px)] bg-[length:18px_18px] p-8 dark:bg-[radial-gradient(circle,theme(colors.zinc.800)_1px,transparent_1px)]"
@@ -425,17 +453,16 @@ function Viewport({
         >
             <div className={frameClass} style={{ color: pal.textPrimary }}>
                 <div
-                    className={state.viewMode === 'gallery' ? 'grid grid-cols-2 gap-5' : 'space-y-5'}
                     style={{ background: pal.canvas, padding: framePadding }}
                 >
                     {state.viewMode === 'screen' && (
-                        <div className="flex items-end justify-between">
+                        <div className="mb-5 flex items-end justify-between">
                             <div>
                                 <div
                                     className="text-xl font-semibold"
                                     style={{ color: pal.textPrimary }}
                                 >
-                                    {project.label}
+                                    {state.screen.title}
                                 </div>
                                 <div
                                     className="mt-1 text-xs"
@@ -455,30 +482,80 @@ function Viewport({
                             </div>
                         </div>
                     )}
-                    {state.viewMode === 'gallery'
-                        ? items.map((item) => (
-                              <PreviewBlock
-                                  key={item.id}
-                                  item={item}
-                                  resolution={resolutions[item.id]}
-                                  selected={selected === item.id}
-                                  select={select}
-                              />
-                          ))
-                        : renderProjectScreen(state.project, items, resolutions, selected, select)}
+
+                    {state.viewMode === 'gallery' ? (
+                        <div className="grid grid-cols-2 gap-5">
+                            {allSlots.map((slot) => (
+                                <SlotBlock
+                                    key={slot.id}
+                                    slot={slot}
+                                    resolution={resolutions[slot.id]}
+                                    selected={selected === slot.id}
+                                    select={select}
+                                />
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="space-y-5">
+                            {state.screen.regions.map((region) => (
+                                <RegionBlock
+                                    key={region.id}
+                                    region={region}
+                                    resolutions={resolutions}
+                                    selected={selected}
+                                    select={select}
+                                />
+                            ))}
+                        </div>
+                    )}
                 </div>
             </div>
         </main>
     );
 }
 
-function PreviewBlock({
-    item,
+function RegionBlock({
+    region,
+    resolutions,
+    selected,
+    select,
+}: {
+    region: UIRegion;
+    resolutions: Record<string, ComponentResolution>;
+    selected: string | null;
+    select: (id: string | null) => void;
+}) {
+    const layoutClass =
+        region.layout === 'grid-2'
+            ? 'grid grid-cols-2 gap-4'
+            : region.layout === 'grid-3'
+              ? 'grid grid-cols-3 gap-4'
+              : region.layout === 'row'
+                ? 'flex flex-wrap items-start gap-4'
+                : 'space-y-4';
+
+    return (
+        <div className={layoutClass}>
+            {region.slots.map((slot) => (
+                <SlotBlock
+                    key={slot.id}
+                    slot={slot}
+                    resolution={resolutions[slot.id]}
+                    selected={selected === slot.id}
+                    select={select}
+                />
+            ))}
+        </div>
+    );
+}
+
+function SlotBlock({
+    slot,
     resolution,
     selected,
     select,
 }: {
-    item: PreviewItem;
+    slot: UISlot;
     resolution: ComponentResolution;
     selected: boolean;
     select: (id: string) => void;
@@ -499,7 +576,7 @@ function PreviewBlock({
             }}
             onClick={(event) => {
                 event.stopPropagation();
-                select(item.id);
+                select(slot.id);
             }}
         >
             {selected && (
@@ -507,81 +584,661 @@ function PreviewBlock({
                     className="absolute -top-3 left-3 z-10 rounded px-2 py-0.5 font-mono text-[10px] uppercase text-white"
                     style={{ background: css.palette.accent }}
                 >
-                    {item.label}
+                    {slot.label}
                 </span>
             )}
-            {renderPreviewItem(item, css)}
+            {renderSlot(slot, css)}
         </div>
     );
 }
 
-function renderProjectScreen(
-    project: keyof typeof projects,
-    items: PreviewItem[],
-    resolutions: Record<string, ComponentResolution>,
-    selected: string | null,
-    select: (id: string) => void,
-) {
-    const byComponent = (component: PreviewItem['component']) =>
-        items.find((item) => item.component === component);
-    const byLabel = (label: string) => items.find((item) => item.label === label);
-    const block = (item: PreviewItem | undefined) =>
-        item ? (
-            <PreviewBlock
-                key={item.id}
-                item={item}
-                resolution={resolutions[item.id]}
-                selected={selected === item.id}
-                select={select}
-            />
-        ) : null;
+function renderSlot(slot: UISlot, css: MaterializedTokens): React.ReactNode {
+    const { componentType, data } = slot;
 
-    if (project === 'healthcare') {
+    const common = {
+        background: css.surface,
+        color: css.text,
+        border: `${css.borderWidth}px solid ${css.border}`,
+        borderRadius: css.radius,
+        boxShadow: css.shadow,
+        fontSize: css.fontSize,
+    };
+
+    // ── shared legacy components ──────────────────────────────────────────────
+
+    if (componentType === 'table') {
+        const headings = (data.headings as string[] | undefined) ?? ['Col A', 'Col B', 'Col C'];
+        const rows = (data.rows as string[][] | undefined) ?? [];
+
         return (
-            <div className="space-y-7">
-                {block(byComponent('card'))}
-                <div className="grid grid-cols-[1fr_auto] items-end gap-5">
-                    {block(byComponent('input'))}
-                    {block(byComponent('badge'))}
-                </div>
-                <div className="grid grid-cols-[0.95fr_1.05fr] gap-7">
-                    {block(byComponent('panel'))}
-                    {block(byComponent('table'))}
-                </div>
-                <div>{block(byComponent('button'))}</div>
+            <div style={common} className="overflow-hidden">
+                <table className="w-full border-collapse" style={{ fontSize: css.fontSize }}>
+                    <thead style={{ background: css.palette.muted }}>
+                        <tr>
+                            {headings.map((head) => (
+                                <th key={head} className="border-b px-3 py-2 text-left font-mono text-[10px] uppercase tracking-wider text-zinc-500">
+                                    {head}
+                                </th>
+                            ))}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {rows.map((row, ri) => (
+                            <tr key={ri} className="border-b border-black/10 last:border-b-0">
+                                {row.map((cell, ci) => (
+                                    <td key={ci} className="px-3 py-2 font-mono">{cell}</td>
+                                ))}
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
             </div>
         );
     }
 
-    if (project === 'fintech') {
+    if (componentType === 'button') {
         return (
-            <div className="space-y-3">
-                {block(byComponent('table'))}
-                <div className="grid grid-cols-[1fr_auto_auto] items-start gap-3">
-                    {block(byComponent('badge'))}
-                    {block(byComponent('input'))}
-                    {block(byComponent('button'))}
+            <button
+                style={{
+                    background: css.palette.accent,
+                    color: 'white',
+                    borderRadius: css.radius,
+                    boxShadow: css.shadow,
+                    padding: `${Math.max(css.spacing * 0.6, 6)}px ${css.spacing * 1.4}px`,
+                    fontSize: css.fontSize,
+                }}
+            >
+                {String(data.label ?? 'Button')}
+            </button>
+        );
+    }
+
+    if (componentType === 'input') {
+        return (
+            <label className="block space-y-1">
+                <span className="font-mono text-[10px] uppercase tracking-wider" style={{ color: css.palette.textSecondary }}>
+                    {String(data.label ?? 'Input')}
+                </span>
+                <input
+                    defaultValue={String(data.value ?? '')}
+                    style={{
+                        ...common,
+                        background: css.palette.canvas,
+                        padding: `${Math.max(css.spacing * 0.55, 7)}px ${Math.max(css.spacing, 10)}px`,
+                        outline: slot.state === 'focus' ? `3px solid ${css.palette.borderFocus}33` : 'none',
+                        width: '100%',
+                    }}
+                />
+            </label>
+        );
+    }
+
+    if (componentType === 'badge') {
+        return (
+            <span
+                style={{
+                    ...common,
+                    display: 'inline-flex',
+                    gap: 6,
+                    alignItems: 'center',
+                    padding: `${Math.max(css.spacing * 0.3, 3)}px ${Math.max(css.spacing * 0.9, 10)}px`,
+                    fontFamily: 'ui-monospace, monospace',
+                    textTransform: 'uppercase',
+                }}
+            >
+                <span className="h-1.5 w-1.5 rounded-full" style={{ background: css.border }} />
+                {String(data.label ?? 'Badge')}
+            </span>
+        );
+    }
+
+    if (componentType === 'card') {
+        return (
+            <section
+                style={{
+                    ...common,
+                    padding: Math.max(css.spacing * 1.4, css.spacing + 4),
+                }}
+                className="space-y-3"
+            >
+                {data.title && <h3 style={{ fontSize: css.headingSize, fontWeight: 650 }}>{String(data.title)}</h3>}
+                {data.body && <p className="leading-6">{String(data.body)}</p>}
+            </section>
+        );
+    }
+
+    if (componentType === 'panel') {
+        return (
+            <section
+                style={{
+                    ...common,
+                    padding: Math.max(css.spacing * 1.4, css.spacing + 4),
+                }}
+                className="space-y-3"
+            >
+                {data.title && <h3 style={{ fontSize: css.headingSize, fontWeight: 650 }}>{String(data.title)}</h3>}
+                {data.body && <p className="leading-6">{String(data.body)}</p>}
+            </section>
+        );
+    }
+
+    // ── enterprise domain components ─────────────────────────────────────────
+
+    if (componentType === 'stat-row') {
+        const stats = (data.stats as Array<{ label: string; value: number | string; status: string }> | undefined) ?? [];
+        const statusBorder = (status: string) => {
+            if (status === 'warning') {
+return css.palette.borderWarning;
+}
+
+            if (status === 'danger') {
+return css.palette.borderDanger;
+}
+
+            if (status === 'success') {
+return css.palette.borderSuccess;
+}
+
+            return css.palette.borderVisible;
+        };
+
+        return (
+            <div style={{ display: 'flex', gap: css.spacing * 1.5, flexWrap: 'wrap' as const }}>
+                {stats.map((stat, i) => (
+                    <div
+                        key={i}
+                        style={{
+                            padding: css.spacing,
+                            borderRadius: css.radius,
+                            borderLeft: `3px solid ${statusBorder(stat.status)}`,
+                            background: css.surface,
+                            border: `${css.borderWidth}px solid ${css.border}`,
+                            borderLeftWidth: 3,
+                            borderLeftColor: statusBorder(stat.status),
+                            minWidth: 90,
+                        }}
+                    >
+                        <div style={{ fontSize: css.headingSize, fontWeight: 700, fontFamily: 'ui-monospace, monospace' }}>
+                            {String(stat.value)}
+                        </div>
+                        <div style={{ fontSize: css.labelSize, fontFamily: 'ui-monospace, monospace', textTransform: 'uppercase' as const, color: css.palette.textMuted, marginTop: 2, letterSpacing: '0.05em' }}>
+                            {stat.label}
+                        </div>
+                    </div>
+                ))}
+            </div>
+        );
+    }
+
+    if (componentType === 'exception-queue') {
+        const items = (data.items as Array<{ id: string; control: string; status: string; variance: string; owner: string }> | undefined) ?? [];
+        const statusBorder = (status: string) => {
+            if (status === 'warning') {
+return css.palette.borderWarning;
+}
+
+            if (status === 'danger') {
+return css.palette.borderDanger;
+}
+
+            if (status === 'success') {
+return css.palette.borderSuccess;
+}
+
+            return css.palette.borderVisible;
+        };
+        const statusColor = (status: string) => {
+            if (status === 'warning') {
+return css.palette.borderWarning;
+}
+
+            if (status === 'danger') {
+return css.palette.borderDanger;
+}
+
+            if (status === 'success') {
+return css.palette.borderSuccess;
+}
+
+            return css.palette.textSecondary;
+        };
+
+        return (
+            <div style={{ ...common, overflow: 'hidden' }}>
+                <div style={{ padding: `${css.spacing * 0.6}px ${css.spacing}px`, fontFamily: 'ui-monospace, monospace', fontSize: css.labelSize, textTransform: 'uppercase' as const, letterSpacing: '0.07em', color: css.palette.textMuted, borderBottom: `1px solid ${css.palette.borderSubtle}` }}>
+                    Exception queue
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                    {block(byComponent('card'))}
-                    {block(byComponent('panel'))}
+                {items.map((item, i) => (
+                    <div
+                        key={i}
+                        style={{
+                            display: 'grid',
+                            gridTemplateColumns: '80px 1fr 70px 70px 90px',
+                            alignItems: 'center',
+                            borderLeft: `3px solid ${statusBorder(item.status)}`,
+                            borderBottom: `1px solid ${css.palette.borderSubtle}`,
+                            padding: `${css.spacing * 0.5}px ${css.spacing}px`,
+                            gap: css.spacing * 0.5,
+                        }}
+                    >
+                        <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: css.fontSize }}>{item.id}</span>
+                        <span style={{ fontSize: css.fontSize }}>{item.control}</span>
+                        <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: css.labelSize, textTransform: 'uppercase' as const, color: statusColor(item.status) }}>{item.status}</span>
+                        <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: css.fontSize }}>{item.variance}</span>
+                        <span style={{ color: css.palette.textMuted, fontSize: css.labelSize }}>{item.owner}</span>
+                    </div>
+                ))}
+            </div>
+        );
+    }
+
+    if (componentType === 'audit-trail') {
+        const events = (data.events as Array<{ time: string; actor: string; action: string; note: string }> | undefined) ?? [];
+
+        return (
+            <div style={{ ...common, padding: css.spacing }}>
+                <div style={{ fontFamily: 'ui-monospace, monospace', fontSize: css.labelSize, textTransform: 'uppercase' as const, letterSpacing: '0.07em', color: css.palette.textMuted, marginBottom: css.spacing * 0.75, paddingBottom: css.spacing * 0.5, borderBottom: `1px solid ${css.palette.borderSubtle}` }}>
+                    Audit trail
+                </div>
+                <div style={{ position: 'relative' as const }}>
+                    {events.map((event, i) => (
+                        <div key={i} style={{ display: 'flex', gap: css.spacing * 0.75, marginBottom: css.spacing * 0.75 }}>
+                            <div style={{ display: 'flex', flexDirection: 'column' as const, alignItems: 'center', width: 32 }}>
+                                <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: css.labelSize, color: css.palette.textMuted, whiteSpace: 'nowrap' as const }}>{event.time}</span>
+                            </div>
+                            <div style={{ borderLeft: `2px solid ${css.palette.borderSubtle}`, paddingLeft: css.spacing * 0.75, flex: 1 }}>
+                                <div style={{ fontWeight: 600, fontSize: css.fontSize, color: css.palette.accent }}>{event.actor}</div>
+                                <div style={{ fontSize: css.fontSize, color: css.text }}>{event.action}</div>
+                                <div style={{ fontSize: css.labelSize, color: css.palette.textMuted, marginTop: 2 }}>{event.note}</div>
+                            </div>
+                        </div>
+                    ))}
                 </div>
             </div>
         );
     }
 
+    if (componentType === 'approval-chain') {
+        const steps = (data.steps as string[] | undefined) ?? [];
+        const current = (data.current as number | undefined) ?? 0;
+
+        return (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 0, flexWrap: 'nowrap' as const }}>
+                {steps.map((step, i) => {
+                    const isActive = i === current;
+                    const isDone = i < current;
+
+                    return (
+                        <div key={i} style={{ display: 'flex', alignItems: 'center' }}>
+                            <div style={{
+                                padding: `${css.spacing * 0.4}px ${css.spacing}px`,
+                                borderRadius: css.radius,
+                                background: isActive ? css.palette.accent : isDone ? css.palette.success : css.surface,
+                                color: isActive ? 'white' : isDone ? css.palette.textSecondary : css.palette.textMuted,
+                                border: `${css.borderWidth}px solid ${isActive ? css.palette.accent : css.border}`,
+                                fontSize: css.fontSize,
+                                fontWeight: isActive ? 600 : 400,
+                                whiteSpace: 'nowrap' as const,
+                            }}>
+                                {isDone && <span style={{ marginRight: 4 }}>✓</span>}
+                                {step}
+                            </div>
+                            {i < steps.length - 1 && (
+                                <div style={{ width: 24, height: 1, background: css.border, flexShrink: 0 }} />
+                            )}
+                        </div>
+                    );
+                })}
+            </div>
+        );
+    }
+
+    // ── healthcare domain components ──────────────────────────────────────────
+
+    if (componentType === 'patient-summary') {
+        const alerts = (data.alerts as string[] | undefined) ?? [];
+
+        return (
+            <div style={{ ...common, padding: Math.max(css.spacing * 2, css.spacing + 12) }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: css.spacing }}>
+                    <div>
+                        <div style={{ fontSize: css.headingSize * 1.2, fontWeight: 700, fontFamily: 'ui-monospace, monospace', color: css.text }}>
+                            {String(data.id ?? 'PT-0000')}
+                        </div>
+                        <div style={{ fontSize: css.fontSize, color: css.palette.textSecondary, marginTop: 4 }}>
+                            Age {String(data.age ?? '—')} · {String(data.ward ?? '—')}
+                        </div>
+                        <div style={{ fontSize: css.labelSize, color: css.palette.textMuted, marginTop: 2 }}>
+                            Attending: {String(data.attending ?? '—')}
+                        </div>
+                    </div>
+                </div>
+                {alerts.length > 0 && (
+                    <div style={{ display: 'flex', gap: css.spacing * 0.5, flexWrap: 'wrap' as const, marginTop: css.spacing * 0.75 }}>
+                        {alerts.map((alert, i) => (
+                            <span key={i} style={{
+                                padding: `${css.spacing * 0.3}px ${css.spacing * 0.75}px`,
+                                borderRadius: css.radius,
+                                background: css.palette.warning,
+                                border: `1px solid ${css.palette.borderWarning}`,
+                                fontSize: css.labelSize,
+                                fontFamily: 'ui-monospace, monospace',
+                                color: css.text,
+                            }}>{alert}</span>
+                        ))}
+                    </div>
+                )}
+            </div>
+        );
+    }
+
+    if (componentType === 'medication-list') {
+        const items = (data.items as Array<{ name: string; status: string; note: string }> | undefined) ?? [];
+        const statusBorder = (status: string) => {
+            if (status === 'warning') {
+return css.palette.borderWarning;
+}
+
+            if (status === 'danger') {
+return css.palette.borderDanger;
+}
+
+            if (status === 'success') {
+return css.palette.borderSuccess;
+}
+
+            return css.palette.borderVisible;
+        };
+
+        return (
+            <div style={{ ...common, overflow: 'hidden' }}>
+                <div style={{ padding: `${css.spacing * 0.6}px ${css.spacing}px`, fontFamily: 'ui-monospace, monospace', fontSize: css.labelSize, textTransform: 'uppercase' as const, letterSpacing: '0.07em', color: css.palette.textMuted, borderBottom: `1px solid ${css.palette.borderSubtle}` }}>
+                    Medications
+                </div>
+                {items.map((item, i) => (
+                    <div
+                        key={i}
+                        style={{
+                            borderLeft: `3px solid ${statusBorder(item.status)}`,
+                            borderBottom: `1px solid ${css.palette.borderSubtle}`,
+                            padding: `${css.spacing * 0.75}px ${css.spacing}px`,
+                        }}
+                    >
+                        <div style={{ fontSize: css.fontSize, fontWeight: 500, color: css.text }}>{item.name}</div>
+                        <div style={{ fontSize: css.labelSize, color: css.palette.textMuted, marginTop: 2 }}>{item.note}</div>
+                    </div>
+                ))}
+            </div>
+        );
+    }
+
+    if (componentType === 'care-timeline') {
+        const events = (data.events as Array<{ time: string; type: string; text: string }> | undefined) ?? [];
+        const dotColor = (type: string) => {
+            if (type === 'warning') {
+return css.palette.borderWarning;
+}
+
+            if (type === 'danger') {
+return css.palette.borderDanger;
+}
+
+            if (type === 'success') {
+return css.palette.borderSuccess;
+}
+
+            return css.palette.borderVisible;
+        };
+
+        return (
+            <div style={{ ...common, padding: css.spacing }}>
+                <div style={{ fontFamily: 'ui-monospace, monospace', fontSize: css.labelSize, textTransform: 'uppercase' as const, letterSpacing: '0.07em', color: css.palette.textMuted, marginBottom: css.spacing * 0.75, paddingBottom: css.spacing * 0.5, borderBottom: `1px solid ${css.palette.borderSubtle}` }}>
+                    Care timeline
+                </div>
+                <div style={{ position: 'relative' as const, paddingLeft: 20 }}>
+                    {events.map((event, i) => (
+                        <div key={i} style={{ position: 'relative' as const, marginBottom: css.spacing * 0.75, paddingLeft: css.spacing * 0.5 }}>
+                            <div style={{
+                                position: 'absolute' as const,
+                                left: -14,
+                                top: 4,
+                                width: 8,
+                                height: 8,
+                                borderRadius: '50%',
+                                background: dotColor(event.type),
+                            }} />
+                            {i < events.length - 1 && (
+                                <div style={{
+                                    position: 'absolute' as const,
+                                    left: -11,
+                                    top: 14,
+                                    width: 2,
+                                    height: `calc(100% + ${css.spacing * 0.75}px)`,
+                                    background: css.palette.borderSubtle,
+                                }} />
+                            )}
+                            <div style={{ fontSize: css.fontSize, color: css.text }}>{event.text}</div>
+                            <div style={{ fontSize: css.labelSize, fontFamily: 'ui-monospace, monospace', color: css.palette.textMuted, marginTop: 2 }}>{event.time}</div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        );
+    }
+
+    if (componentType === 'vitals-bar') {
+        const readings = (data.readings as Array<{ label: string; value: string; status: string }> | undefined) ?? [];
+        const vitalBg = (status: string) => {
+            if (status === 'warning') {
+return css.palette.warning;
+}
+
+            if (status === 'danger') {
+return css.palette.danger;
+}
+
+            if (status === 'success') {
+return css.palette.success;
+}
+
+            return css.surface;
+        };
+        const vitalBorder = (status: string) => {
+            if (status === 'warning') {
+return css.palette.borderWarning;
+}
+
+            if (status === 'danger') {
+return css.palette.borderDanger;
+}
+
+            if (status === 'success') {
+return css.palette.borderSuccess;
+}
+
+            return css.border;
+        };
+
+        return (
+            <div style={{ display: 'flex', gap: css.spacing, flexWrap: 'wrap' as const }}>
+                {readings.map((reading, i) => (
+                    <div
+                        key={i}
+                        style={{
+                            padding: css.spacing,
+                            borderRadius: css.radius,
+                            background: vitalBg(reading.status),
+                            border: `${css.borderWidth}px solid ${vitalBorder(reading.status)}`,
+                            minWidth: 80,
+                            textAlign: 'center' as const,
+                        }}
+                    >
+                        <div style={{ fontSize: css.headingSize, fontWeight: 700, fontFamily: 'ui-monospace, monospace', color: css.text }}>
+                            {reading.value}
+                        </div>
+                        <div style={{ fontSize: css.labelSize, fontFamily: 'ui-monospace, monospace', textTransform: 'uppercase' as const, color: css.palette.textMuted, marginTop: 2, letterSpacing: '0.05em' }}>
+                            {reading.label}
+                        </div>
+                    </div>
+                ))}
+            </div>
+        );
+    }
+
+    // ── fintech domain components ─────────────────────────────────────────────
+
+    if (componentType === 'position-grid') {
+        const rows = (data.rows as Array<{ id: string; book: string; signal: string; pnl: string; move: string; desk: string }> | undefined) ?? [];
+        const signalColor = (signal: string) => {
+            if (signal === 'warning') {
+return css.palette.borderWarning;
+}
+
+            if (signal === 'danger') {
+return css.palette.borderDanger;
+}
+
+            if (signal === 'success') {
+return css.palette.borderSuccess;
+}
+
+            return css.palette.textSecondary;
+        };
+        const pnlColor = (pnl: string) => pnl.startsWith('+') ? css.palette.borderSuccess : pnl.startsWith('-') ? css.palette.borderDanger : css.text;
+        const compactFontSize = Math.max(css.fontSize - 1, 10.5);
+
+        return (
+            <div style={{ ...common, overflow: 'hidden' }}>
+                <table className="w-full border-collapse" style={{ fontSize: compactFontSize }}>
+                    <thead style={{ background: css.palette.muted }}>
+                        <tr>
+                            {['Symbol', 'Book', 'Signal', 'P&L', 'Move', 'Desk'].map((h) => (
+                                <th key={h} className="border-b px-2 py-1.5 text-left font-mono text-[10px] uppercase tracking-wider" style={{ color: css.palette.textMuted }}>
+                                    {h}
+                                </th>
+                            ))}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {rows.map((row, i) => (
+                            <tr key={i} style={{ borderBottom: `1px solid ${css.palette.borderSubtle}` }}>
+                                <td style={{ padding: '3px 8px', fontFamily: 'ui-monospace, monospace', fontWeight: 700 }}>{row.id}</td>
+                                <td style={{ padding: '3px 8px', color: css.palette.textSecondary }}>{row.book}</td>
+                                <td style={{ padding: '3px 8px' }}>
+                                    <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: css.labelSize, textTransform: 'uppercase' as const, color: signalColor(row.signal) }}>{row.signal}</span>
+                                </td>
+                                <td style={{ padding: '3px 8px', fontFamily: 'ui-monospace, monospace', color: pnlColor(row.pnl) }}>{row.pnl}</td>
+                                <td style={{ padding: '3px 8px', fontFamily: 'ui-monospace, monospace', color: pnlColor(row.move) }}>{row.move}</td>
+                                <td style={{ padding: '3px 8px', fontFamily: 'ui-monospace, monospace', fontSize: css.labelSize, color: css.palette.textMuted }}>{row.desk}</td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        );
+    }
+
+    if (componentType === 'metric-ticker') {
+        const status = String(data.status ?? 'default');
+        const deltaColor = status === 'success' ? css.palette.borderSuccess : status === 'warning' ? css.palette.borderWarning : status === 'danger' ? css.palette.borderDanger : css.palette.textSecondary;
+
+        return (
+            <div style={{ ...common, padding: css.spacing, minWidth: 100 }}>
+                <div style={{ fontFamily: 'ui-monospace, monospace', fontSize: css.labelSize, textTransform: 'uppercase' as const, letterSpacing: '0.07em', color: css.palette.textMuted }}>
+                    {String(data.label ?? '—')}
+                </div>
+                <div style={{ fontFamily: 'ui-monospace, monospace', fontSize: css.fontSize * 1.8, fontWeight: 700, color: css.text, marginTop: 4, lineHeight: 1 }}>
+                    {String(data.value ?? '—')}
+                </div>
+                <div style={{ fontFamily: 'ui-monospace, monospace', fontSize: css.labelSize, color: deltaColor, marginTop: 4 }}>
+                    {String(data.delta ?? '—')}
+                </div>
+            </div>
+        );
+    }
+
+    if (componentType === 'risk-gauge') {
+        const value = Number(data.value ?? 0);
+        const threshold = Number(data.threshold ?? 100);
+        const fillColor = value >= threshold
+            ? css.palette.borderDanger
+            : value >= threshold * 0.8
+              ? css.palette.borderWarning
+              : css.palette.borderSuccess;
+
+        return (
+            <div style={{ ...common, padding: css.spacing }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: css.spacing * 0.5 }}>
+                    <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: css.labelSize, textTransform: 'uppercase' as const, letterSpacing: '0.07em', color: css.palette.textMuted }}>{String(data.label ?? '—')}</span>
+                    <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: css.fontSize, fontWeight: 700 }}>{value}%</span>
+                </div>
+                <div style={{ position: 'relative' as const, height: 10, background: css.palette.muted, borderRadius: css.radius }}>
+                    <div style={{ width: `${Math.min(value, 100)}%`, height: '100%', background: fillColor, borderRadius: css.radius, transition: 'width 0.3s' }} />
+                    <div style={{ position: 'absolute' as const, top: -2, left: `${threshold}%`, width: 2, height: 14, background: css.palette.borderDanger, borderRadius: 1 }} />
+                </div>
+                <div style={{ fontFamily: 'ui-monospace, monospace', fontSize: css.labelSize, color: css.palette.textMuted, marginTop: 4 }}>
+                    limit {threshold}%
+                </div>
+            </div>
+        );
+    }
+
+    if (componentType === 'order-entry') {
+        const side = String(data.side ?? 'buy');
+        const btnBg = side === 'sell' ? css.palette.borderDanger : css.palette.borderSuccess;
+        const fields: Array<[string, string]> = [
+            ['Symbol', String(data.symbol ?? '—')],
+            ['Side', side],
+            ['Quantity', String(data.quantity ?? '0')],
+            ['Type', String(data.type ?? 'limit')],
+            ['Price', String(data.price ?? '0.00')],
+        ];
+        const inputStyle = {
+            background: css.palette.canvas,
+            border: `${css.borderWidth}px solid ${css.border}`,
+            borderRadius: css.radius,
+            fontFamily: 'ui-monospace, monospace',
+            fontSize: css.fontSize,
+            padding: `${css.spacing * 0.4}px ${css.spacing * 0.6}px`,
+            width: '100%',
+            color: css.text,
+        };
+
+        return (
+            <div style={{ ...common, padding: css.spacing }}>
+                <div style={{ fontFamily: 'ui-monospace, monospace', fontSize: css.labelSize, textTransform: 'uppercase' as const, letterSpacing: '0.07em', color: css.palette.textMuted, marginBottom: css.spacing * 0.75, paddingBottom: css.spacing * 0.5, borderBottom: `1px solid ${css.palette.borderSubtle}` }}>
+                    Order entry
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: css.spacing * 0.5, marginBottom: css.spacing * 0.75 }}>
+                    {fields.map(([label, value]) => (
+                        <div key={label}>
+                            <div style={{ fontFamily: 'ui-monospace, monospace', fontSize: css.labelSize, textTransform: 'uppercase' as const, color: css.palette.textMuted, marginBottom: 2 }}>{label}</div>
+                            <input defaultValue={value} style={inputStyle} readOnly />
+                        </div>
+                    ))}
+                </div>
+                <button style={{
+                    width: '100%',
+                    padding: `${css.spacing * 0.5}px`,
+                    background: btnBg,
+                    color: 'white',
+                    borderRadius: css.radius,
+                    fontFamily: 'ui-monospace, monospace',
+                    fontSize: css.fontSize,
+                    fontWeight: 600,
+                    border: 'none',
+                    cursor: 'pointer',
+                }}>
+                    Stage {side} · {String(data.symbol ?? '—')}
+                </button>
+            </div>
+        );
+    }
+
+    // fallback
     return (
-        <div className="space-y-5">
-            {block(byComponent('table'))}
-            <div className="grid grid-cols-[1.25fr_0.75fr] gap-5">
-                {block(byComponent('card'))}
-                {block(byComponent('panel'))}
-            </div>
-            <div className="flex items-center gap-4">
-                {block(byComponent('button'))}
-                {block(byComponent('input'))}
-                {block(byLabel('Drift badge') ?? byComponent('badge'))}
-            </div>
+        <div style={{ ...common, padding: css.spacing }}>
+            <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: css.labelSize, color: css.palette.textMuted }}>{componentType}</span>
         </div>
     );
 }
@@ -826,207 +1483,6 @@ function TokenRow({ label, value, meta }: { label: string; value: string; meta?:
     );
 }
 
-type PreviewItem = {
-    id: string;
-    label: string;
-    component: NonNullable<ConstraintContext['component']>;
-    surface?: ConstraintContext['surface'];
-    state?: ConstraintContext['state'];
-    title?: string;
-    body?: string;
-    inputLabel?: string;
-    inputValue?: string;
-    tableHeadings?: string[];
-    tableRows?: string[][];
-    emphasis?: 'clinical' | 'compact';
-};
-
-const projectItems: Record<keyof typeof projects, PreviewItem[]> = {
-    enterprise: [
-        {
-            id: 'compliance-alerts-table',
-            label: 'Exception register',
-            component: 'table',
-            surface: 'data',
-            tableHeadings: ['Case', 'Control', 'Status', 'Variance', 'Owner'],
-            tableRows: [
-                ['ALR-0418', 'Risk score drift', 'warning', '+4.2s', 'a.kapoor'],
-                ['ALR-0419', 'Latency budget', 'danger', '-18%', 's.olu'],
-                ['ALR-0420', 'Throughput', 'success', '+2.1%', 'r.tan'],
-            ],
-        },
-        {
-            id: 'compliance-detail-card',
-            label: 'Exception detail',
-            component: 'card',
-            state: 'warning',
-            title: 'ALR-0418 · Risk score drift',
-            body: 'Portfolio R-114 moved outside the approved tolerance band. The reviewer must capture evidence before acknowledgement.',
-        },
-        {
-            id: 'compliance-review-panel',
-            label: 'Evidence panel',
-            component: 'panel',
-            surface: 'form',
-            title: 'Reviewer evidence',
-            body: 'Attach the control note and policy exception reference.',
-        },
-        {
-            id: 'compliance-primary-button',
-            label: 'Acknowledge button',
-            component: 'button',
-            body: 'Acknowledge',
-        },
-        {
-            id: 'compliance-asset-input',
-            label: 'Case input',
-            component: 'input',
-            surface: 'form',
-            state: 'focus',
-            inputLabel: 'Case ID',
-            inputValue: 'ALR-0418',
-        },
-        {
-            id: 'compliance-status-badge',
-            label: 'Drift badge',
-            component: 'badge',
-            state: 'warning',
-            body: 'Drift',
-        },
-    ],
-    healthcare: [
-        {
-            id: 'healthcare-chart-table',
-            label: 'Patient worklist',
-            component: 'table',
-            surface: 'data',
-            tableHeadings: ['Patient', 'Chart area', 'Status', 'Due', 'Clinician'],
-            tableRows: [
-                ['PT-2048', 'Medication reconciliation', 'warning', '14m', 'n.patel'],
-                ['PT-2091', 'Discharge summary', 'danger', 'overdue', 'r.chen'],
-                ['PT-2110', 'Lab follow-up', 'success', 'done', 'm.ortiz'],
-            ],
-        },
-        {
-            id: 'healthcare-chart-card',
-            label: 'Patient chart card',
-            component: 'card',
-            state: 'warning',
-            title: 'PT-2048 · Medication reconciliation',
-            body: 'A new allergy note conflicts with the active prescription list. Clinical review is required before discharge.',
-            emphasis: 'clinical',
-        },
-        {
-            id: 'healthcare-care-panel',
-            label: 'Care note panel',
-            component: 'panel',
-            surface: 'form',
-            title: 'Care coordination note',
-            body: 'Record follow-up context for the attending clinician and ward coordinator.',
-        },
-        {
-            id: 'healthcare-primary-button',
-            label: 'Escalate button',
-            component: 'button',
-            body: 'Escalate',
-        },
-        {
-            id: 'healthcare-patient-input',
-            label: 'Patient input',
-            component: 'input',
-            surface: 'form',
-            state: 'focus',
-            inputLabel: 'Patient ID',
-            inputValue: 'PT-2048',
-        },
-        {
-            id: 'healthcare-status-badge',
-            label: 'Clinical review badge',
-            component: 'badge',
-            state: 'warning',
-            body: 'Review',
-        },
-    ],
-    fintech: [
-        {
-            id: 'fintech-market-table',
-            label: 'Exposure grid',
-            component: 'table',
-            surface: 'data',
-            emphasis: 'compact',
-            tableHeadings: ['Symbol', 'Book', 'Signal', 'Move', 'Desk'],
-            tableRows: [
-                ['NVDA', 'Growth tech', 'warning', '+3.8%', 'alpha'],
-                ['EURUSD', 'Macro hedge', 'danger', '-1.4%', 'fx'],
-                ['UST10Y', 'Rates', 'success', '+7bp', 'rates'],
-            ],
-        },
-        {
-            id: 'fintech-exposure-card',
-            label: 'Exposure card',
-            component: 'card',
-            state: 'warning',
-            title: 'NVDA · Concentration drift',
-            body: 'Intraday exposure crossed the desk limit after correlated momentum signals moved together.',
-            emphasis: 'compact',
-        },
-        {
-            id: 'fintech-order-panel',
-            label: 'Desk action panel',
-            component: 'panel',
-            surface: 'form',
-            title: 'Trade desk action',
-            body: 'Capture the hedge action and link it to the current limit exception.',
-        },
-        {
-            id: 'fintech-primary-button',
-            label: 'Hedge button',
-            component: 'button',
-            body: 'Stage hedge',
-        },
-        {
-            id: 'fintech-symbol-input',
-            label: 'Symbol input',
-            component: 'input',
-            surface: 'form',
-            state: 'focus',
-            inputLabel: 'Symbol',
-            inputValue: 'NVDA',
-        },
-        {
-            id: 'fintech-status-badge',
-            label: 'Limit badge',
-            component: 'badge',
-            state: 'warning',
-            body: 'Limit',
-        },
-    ],
-};
-
-const galleryExtras: PreviewItem[] = [
-    {
-        id: 'gallery-success-badge',
-        label: 'Success badge',
-        component: 'badge',
-        state: 'success',
-        body: 'Cleared',
-    },
-    {
-        id: 'gallery-danger-card',
-        label: 'Danger card',
-        component: 'card',
-        state: 'danger',
-        title: 'Critical exception',
-        body: 'The active workflow has breached its configured threshold.',
-    },
-];
-
-function getPreviewItems(project: keyof typeof projects, viewMode: WorkspaceState['viewMode']) {
-    const items = projectItems[project] ?? projectItems.enterprise;
-
-    return viewMode === 'gallery' ? [...items, ...galleryExtras] : items;
-}
-
 function buildResolutions(
     state: WorkspaceState,
     rules: Rule[],
@@ -1038,156 +1494,34 @@ function buildResolutions(
         project: state.project,
         persona: state.persona,
     };
-    const items = getPreviewItems(state.project, state.viewMode);
+
+    const slots = state.screen.regions.flatMap((r) => r.slots);
 
     return Object.fromEntries(
-        items.map((item) => {
+        slots.map((slot) => {
             const ctx: ConstraintContext = {
                 ...baseCtx,
-                component: item.component,
-                surface: item.surface,
-                state: item.state,
+                component: componentTypeToContext(slot.componentType),
+                surface: slot.surface,
+                state: slot.state,
             };
             const resolved = resolve(rules, ctx, {
                 ...(overrides['*'] ?? {}),
-                ...(overrides[item.id] ?? {}),
+                ...(overrides[slot.id] ?? {}),
             });
             const css = materialize(resolved, ctx);
 
             return [
-                item.id,
+                slot.id,
                 {
-                    id: item.id,
-                    label: item.label,
+                    id: slot.id,
+                    label: slot.label,
                     ctx,
                     resolved,
                     css,
-                    overrides: overrides[item.id] ?? {},
+                    overrides: overrides[slot.id] ?? {},
                 },
             ];
         }),
     ) as Record<string, ComponentResolution>;
-}
-
-function renderPreviewItem(item: PreviewItem, css: ComponentResolution['css']) {
-    const common = {
-        background: css.surface,
-        color: css.text,
-        border: `${css.borderWidth}px solid ${css.border}`,
-        borderRadius: css.radius,
-        boxShadow: css.shadow,
-        fontSize: css.fontSize,
-    };
-
-    if (item.component === 'table') {
-        return (
-            <div style={common} className="overflow-hidden">
-                <table
-                    className="w-full border-collapse"
-                    style={{
-                        fontSize:
-                            item.emphasis === 'compact'
-                                ? Math.max(css.fontSize - 1.5, 10.5)
-                                : css.fontSize,
-                    }}
-                >
-                    <thead style={{ background: css.palette.muted }}>
-                        <tr>
-                            {(item.tableHeadings ?? ['ID', 'Subject', 'Status', 'Delta', 'Owner']).map((head) => (
-                                <th key={head} className="border-b px-3 py-2 text-left font-mono text-[10px] uppercase tracking-wider text-zinc-500">
-                                    {head}
-                                </th>
-                            ))}
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {(item.tableRows ?? []).map((row) => (
-                            <tr key={row.join(':')} className="border-b border-black/10 last:border-b-0">
-                                {row.map((cell, index) => (
-                                    <td
-                                        key={`${cell}-${index}`}
-                                        className={`${item.emphasis === 'compact' ? 'px-2 py-1.5' : 'px-3 py-2'} ${index === 0 || index > 1 ? 'font-mono' : ''} ${index === 2 ? 'font-mono uppercase' : ''}`}
-                                    >
-                                        {cell}
-                                    </td>
-                                ))}
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-            </div>
-        );
-    }
-
-    if (item.component === 'button') {
-        return (
-            <button
-                style={{
-                    background: css.palette.accent,
-                    color: 'white',
-                    borderRadius: css.radius,
-                    boxShadow: css.shadow,
-                    padding: `${Math.max(css.spacing * 0.6, 6)}px ${css.spacing * 1.4}px`,
-                    fontSize: css.fontSize,
-                }}
-            >
-                {item.body ?? 'Button'}
-            </button>
-        );
-    }
-
-    if (item.component === 'input') {
-        return (
-            <label className="block space-y-1">
-                <span className="font-mono text-[10px] uppercase tracking-wider" style={{ color: css.palette.textSecondary }}>{item.inputLabel ?? 'Asset ID'}</span>
-                <input
-                    defaultValue={item.inputValue ?? 'R-114'}
-                    style={{
-                        ...common,
-                        background: css.palette.canvas,
-                        padding: `${Math.max(css.spacing * 0.55, 7)}px ${Math.max(css.spacing, 10)}px`,
-                        outline: item.state === 'focus' ? `3px solid ${css.palette.borderFocus}33` : 'none',
-                        width: '100%',
-                    }}
-                />
-            </label>
-        );
-    }
-
-    if (item.component === 'badge') {
-        return (
-            <span
-                style={{
-                    ...common,
-                    display: 'inline-flex',
-                    gap: 6,
-                    alignItems: 'center',
-                    padding: `${Math.max(css.spacing * 0.3, 3)}px ${Math.max(css.spacing * 0.9, 10)}px`,
-                    fontFamily: 'ui-monospace, monospace',
-                    textTransform: 'uppercase',
-                }}
-            >
-                <span className="h-1.5 w-1.5 rounded-full" style={{ background: css.border }} />
-                {item.body ?? 'Badge'}
-            </span>
-        );
-    }
-
-    return (
-        <section
-            style={{
-                ...common,
-                padding:
-                    item.emphasis === 'clinical'
-                        ? Math.max(css.spacing * 2, css.spacing + 12)
-                        : item.emphasis === 'compact'
-                          ? Math.max(css.spacing, 8)
-                          : Math.max(css.spacing * 1.4, css.spacing + 4),
-            }}
-            className={item.emphasis === 'clinical' ? 'space-y-5' : 'space-y-3'}
-        >
-            {item.title && <h3 style={{ fontSize: css.headingSize, fontWeight: 650 }}>{item.title}</h3>}
-            {item.body && <p className="leading-6">{item.body}</p>}
-        </section>
-    );
 }

@@ -28,10 +28,11 @@ final class ConstraintInterpreter implements Agent, HasStructuredOutput
     public function instructions(): Stringable|string
     {
         return <<<'PROMPT'
-You are the constraint interpreter inside Frame, a deterministic semantic UI builder.
+You are the constraint interpreter inside Frame, a semantic UI design system.
 
-The user is iteratively refining a semantic design system. You do not write CSS, classes, Tailwind, or component code. You only propose semantic constraint deltas using this vocabulary:
+The user is iteratively designing and refining UI for domain-specific applications. You can propose two kinds of changes:
 
+1. SEMANTIC TOKENS — adjust how components look using the token vocabulary:
 surface: neutral | muted | warning | danger | success
 text: primary | secondary | muted
 border: subtle | visible | strong | none | warning | danger | success | focus
@@ -43,10 +44,18 @@ motion: minimal | subtle | normal | expressive
 contrast: normal | high
 type.scale: sm | md | lg
 
-Resolution layers, highest precedence first:
+2. SCREEN LAYOUT — propose a different arrangement of UI regions and components using these component types:
+Shared: card | button | input | panel | badge | table
+Enterprise/compliance: exception-queue | audit-trail | approval-chain | stat-row
+Healthcare: patient-summary | medication-list | care-timeline | vitals-bar
+Fintech: position-grid | metric-ticker | risk-gauge | order-entry
+
+Resolution layers (highest precedence first):
 override > state > component > context > persona > project > theme > base
 
-Return a small structured delta. Prefer the smallest useful change. If the user asks for CSS, visual polish, or direct styling, translate that request into semantic tokens. If a selected component exists, use scope "selected" for targeted requests. If no selected component exists, or the user asks for broad language changes, use scope "global".
+When the user asks to change how things look, return token deltas. When the user asks to add a component, change the layout, or redesign a section, return a screen delta with the new regions. You may return both at once.
+
+Prefer the smallest useful change. If scope is "selected" and a component is selected, target that component. Otherwise use scope "global".
 PROMPT;
     }
 
@@ -77,6 +86,24 @@ PROMPT;
                 'to' => $schema->string()->required(),
                 'reason' => $schema->string()->required(),
             ]))->required(),
+            'screen' => $schema->object([
+                'regions' => $schema->array()->items($schema->object([
+                    'id' => $schema->string()->required(),
+                    'layout' => $schema->string()->enum(['stack', 'grid-2', 'grid-3', 'row'])->required(),
+                    'slots' => $schema->array()->items($schema->object([
+                        'id' => $schema->string()->required(),
+                        'label' => $schema->string()->required(),
+                        'componentType' => $schema->string()->enum([
+                            'card', 'button', 'input', 'panel', 'badge', 'table',
+                            'exception-queue', 'audit-trail', 'approval-chain', 'stat-row',
+                            'patient-summary', 'medication-list', 'care-timeline', 'vitals-bar',
+                            'position-grid', 'metric-ticker', 'risk-gauge', 'order-entry',
+                        ])->required(),
+                        'surface' => $schema->string()->enum(['canvas', 'form', 'data', 'hero']),
+                        'state' => $schema->string()->enum(['warning', 'danger', 'focus', 'disabled', 'success', 'default']),
+                    ]))->required(),
+                ]))->required(),
+            ]),
         ];
     }
 }
