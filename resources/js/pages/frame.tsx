@@ -1,25 +1,24 @@
-import { Head } from '@inertiajs/react';
+import { Head, usePage } from '@inertiajs/react';
 import { Send } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { materialize, palette } from '@/lib/frame/materializer';
 import {
-    buildRuleset,
+    buildRulesetFromDomain,
     componentTypeToContext,
-    defaultPersonaForProject,
     mergeScreenDelta,
-    personae,
-    personaeForProject,
+    personaeForDomain,
     projectScreens,
-    projects,
-    validPersonaForProject,
+    validPersonaForDomain,
 } from '@/lib/frame/presets';
 import { resolve } from '@/lib/frame/resolver';
 import type {
     ComponentResolution,
     ConstraintContext,
+    DomainDefinition,
     InterpreterResponse,
     MaterializedTokens,
     Overrides,
+    PersonaDefinition,
     Rule,
     TokenName,
     TokenValue,
@@ -30,8 +29,8 @@ import type {
 } from '@/lib/frame/types';
 
 type WorkspaceState = {
-    project: keyof typeof projects;
-    persona: keyof typeof personae;
+    project: string;
+    persona: string;
     previewMode: 'light' | 'dark';
     density: 'compact' | 'comfortable' | 'spacious';
     viewMode: 'screen' | 'gallery';
@@ -75,22 +74,32 @@ const tokenOptions: Record<TokenName, TokenValue[]> = {
 };
 
 export default function Frame() {
+    const { domains } = usePage<{ domains: DomainDefinition[] }>().props;
+    const firstDomain = domains[0];
+
     const [state, setState] = useState<WorkspaceState>({
-        project: 'enterprise',
-        persona: 'compliance-ops-manager',
-        previewMode: 'dark',
-        density: 'compact',
+        project: firstDomain?.id ?? 'enterprise',
+        persona: firstDomain?.default_persona_id ?? 'compliance-ops-manager',
+        previewMode: (firstDomain?.ambient.mode ?? 'dark') as WorkspaceState['previewMode'],
+        density: (firstDomain?.ambient.density ?? 'compact') as WorkspaceState['density'],
         viewMode: 'screen',
         selected: null,
-        screen: projectScreens.enterprise,
+        screen: projectScreens[firstDomain?.id as keyof typeof projectScreens] ?? projectScreens.enterprise,
     });
     const [overrides, setOverrides] = useState<Record<string, Overrides>>({});
     const [history, setHistory] = useState<ChatMessage[]>([]);
     const [busy, setBusy] = useState(false);
 
+    const currentDomain = domains.find((d) => d.id === state.project) ?? firstDomain ?? null;
+    const currentPersona: PersonaDefinition | null =
+        currentDomain ? validPersonaForDomain(currentDomain, state.persona) : null;
+
     const rules = useMemo(
-        () => buildRuleset(state.project, state.persona, state.density),
-        [state.project, state.persona, state.density],
+        () =>
+            currentDomain
+                ? buildRulesetFromDomain(currentDomain, state.persona, state.density)
+                : [],
+        [currentDomain, state.persona, state.density],
     );
 
     const resolutions = useMemo(
@@ -191,7 +200,7 @@ export default function Frame() {
             if (data.screen) {
                 setState((current) => ({
                     ...current,
-                    screen: mergeScreenDelta(current.screen, data.screen as UIScreenDelta, current.project),
+                    screen: mergeScreenDelta(current.screen, data.screen as UIScreenDelta, current.project as keyof typeof projectScreens),
                 }));
             }
 
@@ -219,18 +228,19 @@ export default function Frame() {
         <>
             <Head title="Frame" />
             <div className="grid h-screen grid-cols-[296px_1fr_340px] grid-rows-[44px_1fr_202px] overflow-hidden bg-zinc-50 text-[13px] text-zinc-950 dark:bg-zinc-950 dark:text-zinc-50">
-                <Topbar state={state} patchState={patchState} resetOverrides={resetOverrides} />
+                <Topbar state={state} patchState={patchState} resetOverrides={resetOverrides} domains={domains} />
                 <ChatPane history={history} busy={busy} selected={selected} sendIntent={sendIntent} />
                 <Viewport
                     state={state}
                     resolutions={resolutions}
                     selected={state.selected}
                     select={(id) => patchState({ selected: id })}
+                    currentDomain={currentDomain}
                 />
                 <TracePane
                     selected={selected}
-                    project={projects[state.project]}
-        persona={personae[validPersonaForProject(state.project, state.persona)]}
+                    domain={currentDomain}
+                    persona={currentPersona}
                 />
                 <Inspector
                     selected={selected}
@@ -246,11 +256,15 @@ function Topbar({
     state,
     patchState,
     resetOverrides,
+    domains,
 }: {
     state: WorkspaceState;
     patchState: (patch: Partial<WorkspaceState>) => void;
     resetOverrides: () => void;
+    domains: DomainDefinition[];
 }) {
+    const currentDomain = domains.find((d) => d.id === state.project) ?? domains[0] ?? null;
+
     return (
         <div className="col-span-3 flex items-center gap-3 border-b border-zinc-200 bg-white px-3 dark:border-zinc-800 dark:bg-zinc-900">
             <div className="mr-2 flex items-center gap-2 border-r border-zinc-200 pr-4 font-semibold dark:border-zinc-800">
@@ -263,33 +277,25 @@ function Topbar({
             <Select
                 label="Project"
                 value={state.project}
-                options={Object.values(projects).map((project) => ({
-                    value: project.id,
-                    label: project.label,
-                }))}
-                onChange={(project) => {
-                    const ambient = projects[project as keyof typeof projects].ambient;
+                options={domains.map((d) => ({ value: d.id, label: d.label }))}
+                onChange={(projectId) => {
+                    const domain = domains.find((d) => d.id === projectId);
                     resetOverrides();
                     patchState({
-                        project: project as WorkspaceState['project'],
-                        persona: defaultPersonaForProject(project),
-                        previewMode: ambient.mode as WorkspaceState['previewMode'],
-                        density: ambient.density as WorkspaceState['density'],
+                        project: projectId,
+                        persona: domain?.default_persona_id ?? '',
+                        previewMode: (domain?.ambient.mode ?? 'dark') as WorkspaceState['previewMode'],
+                        density: (domain?.ambient.density ?? 'compact') as WorkspaceState['density'],
                         selected: null,
-                        screen: projectScreens[project as keyof typeof projects],
+                        screen: projectScreens[projectId as keyof typeof projectScreens] ?? projectScreens.enterprise,
                     });
                 }}
             />
             <Select
                 label="Persona"
                 value={state.persona}
-                options={personaeForProject(state.project).map((persona) => ({
-                    value: persona.id,
-                    label: persona.label,
-                }))}
-                onChange={(persona) =>
-                    patchState({ persona: persona as WorkspaceState['persona'] })
-                }
+                options={currentDomain ? personaeForDomain(currentDomain).map((p) => ({ value: p.id, label: p.label })) : []}
+                onChange={(persona) => patchState({ persona })}
             />
             <Segment
                 value={state.previewMode}
@@ -426,14 +432,15 @@ function Viewport({
     resolutions,
     selected,
     select,
+    currentDomain,
 }: {
     state: WorkspaceState;
     resolutions: Record<string, ComponentResolution>;
     selected: string | null;
     select: (id: string | null) => void;
+    currentDomain: DomainDefinition | null;
 }) {
     const pal = palette(state.previewMode, state.project);
-    const project = projects[state.project];
     const frameClass =
         state.project === 'fintech'
             ? 'mx-auto max-w-7xl space-y-4'
@@ -468,7 +475,7 @@ function Viewport({
                                     className="mt-1 text-xs"
                                     style={{ color: pal.textSecondary }}
                                 >
-                                    {project.summary} · {project.ambient.domain}
+                                    {currentDomain?.summary ?? ''} · {currentDomain?.ambient.domain ?? ''}
                                 </div>
                             </div>
                             <div
@@ -478,7 +485,7 @@ function Viewport({
                                     border: `1px solid ${pal.borderVisible}`,
                                 }}
                             >
-                                surface = {project.ambient.domain}
+                                surface = {currentDomain?.ambient.domain ?? ''}
                             </div>
                         </div>
                     )}
@@ -1245,23 +1252,23 @@ return css.palette.borderSuccess;
 
 function TracePane({
     selected,
-    project,
+    domain,
     persona,
 }: {
     selected: ComponentResolution | null;
-    project: (typeof projects)[keyof typeof projects];
-    persona: (typeof personae)[keyof typeof personae];
+    domain: DomainDefinition | null;
+    persona: PersonaDefinition | null;
 }) {
     return (
         <aside className="row-start-2 min-h-0 border-l border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950">
             <PaneHead title="Constraint trace" meta={selected?.label ?? 'unselected'} />
             <div className="space-y-3 overflow-auto p-3">
-                <TraceCard title="Project ambient" meta={project.id}>
-                    <pre className="text-[11px] leading-5">{JSON.stringify(project.ambient, null, 2)}</pre>
+                <TraceCard title="Project ambient" meta={domain?.id ?? ''}>
+                    <pre className="text-[11px] leading-5">{JSON.stringify(domain?.ambient ?? {}, null, 2)}</pre>
                 </TraceCard>
-                <TraceCard title={`Persona · ${persona.label}`}>
+                <TraceCard title={`Persona · ${persona?.label ?? ''}`}>
                     <div className="space-y-1 font-mono text-[11px]">
-                        {persona.derived.map(([constraint, value, reason]) => (
+                        {(persona?.derived ?? []).map(([constraint, value, reason]) => (
                             <div key={constraint} className="grid grid-cols-[76px_1fr] gap-2">
                                 <span className="text-zinc-500">{constraint}</span>
                                 <span>
