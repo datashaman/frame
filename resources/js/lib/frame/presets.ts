@@ -1,4 +1,4 @@
-import type { ConstraintContext, Rule, UIComponentType, UIScreen, UIScreenDelta, UISlot } from './types';
+import type { ConstraintContext, DomainDefinition, PersonaDefinition, Rule, TokenValue, UIComponentType, UIScreen, UIScreenDelta, UISlot } from './types';
 
 export const projects = {
     enterprise: {
@@ -303,6 +303,57 @@ export const stateRules: Rule[] = [
     when: { state },
     reason,
 })) as Rule[];
+
+export function buildRulesetFromDomain(domain: DomainDefinition, personaId: string, density: string): Rule[] {
+    const persona = domain.personae.find((p) => p.id === personaId) ?? domain.personae.find((p) => p.id === domain.default_persona_id) ?? domain.personae[0];
+
+    return [
+        ...baseRules,
+        ...themeRules,
+        ...domain.rules,
+        ...(persona.rules.map((rule) => {
+            // Handle both tuple format [token, value, reason] and object format {token, value, reason}
+            const token = Array.isArray(rule) ? rule[0] : (rule as unknown as Record<string, unknown>).token as string;
+            const value = Array.isArray(rule) ? rule[1] : (rule as unknown as Record<string, unknown>).value as TokenValue;
+            const reason = Array.isArray(rule) ? rule[2] : (rule as unknown as Record<string, unknown>).reason as string;
+
+            return {
+                id: `persona.${persona.id}.${token}`,
+                layer: 'persona',
+                token,
+                value,
+                reason,
+            } as Rule;
+        })),
+        ...contextRules,
+        ...componentRules,
+        ...stateRules,
+        {
+            id: 'ambient.density',
+            layer: 'project',
+            token: 'spacing.inner',
+            value:
+                density === 'compact'
+                    ? 'tight'
+                    : density === 'spacious'
+                      ? 'spacious'
+                      : 'comfortable',
+            reason: `topbar density set to ${density}`,
+        } as Rule,
+    ];
+}
+
+export function defaultPersonaForDomain(domain: DomainDefinition): PersonaDefinition {
+    return domain.personae.find((p) => p.id === domain.default_persona_id) ?? domain.personae[0];
+}
+
+export function personaeForDomain(domain: DomainDefinition): PersonaDefinition[] {
+    return domain.personae;
+}
+
+export function validPersonaForDomain(domain: DomainDefinition, personaId: string): PersonaDefinition {
+    return domain.personae.find((p) => p.id === personaId) ?? defaultPersonaForDomain(domain);
+}
 
 export function buildRuleset(projectId: string, personaId: string, density: string) {
     const project = projects[projectId as keyof typeof projects] ?? projects.enterprise;

@@ -128,3 +128,39 @@ export type UIScreen = {
 export type UIScreenDelta = {
     regions?: UIRegion[];
 };
+
+export type AmbientConfig = {
+    brand: string;
+    mode: 'light' | 'dark';
+    density: 'compact' | 'comfortable' | 'spacious';
+    tone: string;
+    motion: 'minimal' | 'subtle' | 'normal' | 'expressive';
+    contrast: 'normal' | 'high';
+    domain: string;
+};
+
+export type PersonaDefinition = {
+    id: string;
+    label: string;
+    detail: string;
+    derived: [string, string, string][];
+    rules: [string, TokenValue, string][];
+};
+
+export type ComponentDefinition = {
+    id: string;
+    label: string;
+    mapsTo: NonNullable<ConstraintContext['component']>;
+};
+
+export type DomainDefinition = {
+    id: string;
+    label: string;
+    summary: string;
+    ambient: AmbientConfig;
+    default_persona_id: string;
+    rules: Rule[];
+    personae: PersonaDefinition[];
+    components: ComponentDefinition[] | null;
+    default_screen: UIScreen | null;
+};
