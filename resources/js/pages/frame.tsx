@@ -23,7 +23,6 @@ import type {
     Rule,
     TokenName,
     TokenValue,
-    UIComponentType,
     UIRegion,
     UIScreen,
     UIScreenDelta,
@@ -610,6 +609,7 @@ function renderSlot(slot: UISlot, css: MaterializedTokens): React.ReactNode {
     if (componentType === 'table') {
         const headings = (data.headings as string[] | undefined) ?? ['Col A', 'Col B', 'Col C'];
         const rows = (data.rows as string[][] | undefined) ?? [];
+
         return (
             <div style={common} className="overflow-hidden">
                 <table className="w-full border-collapse" style={{ fontSize: css.fontSize }}>
@@ -727,11 +727,21 @@ function renderSlot(slot: UISlot, css: MaterializedTokens): React.ReactNode {
     if (componentType === 'stat-row') {
         const stats = (data.stats as Array<{ label: string; value: number | string; status: string }> | undefined) ?? [];
         const statusBorder = (status: string) => {
-            if (status === 'warning') return css.palette.borderWarning;
-            if (status === 'danger') return css.palette.borderDanger;
-            if (status === 'success') return css.palette.borderSuccess;
+            if (status === 'warning') {
+return css.palette.borderWarning;
+}
+
+            if (status === 'danger') {
+return css.palette.borderDanger;
+}
+
+            if (status === 'success') {
+return css.palette.borderSuccess;
+}
+
             return css.palette.borderVisible;
         };
+
         return (
             <div style={{ display: 'flex', gap: css.spacing * 1.5, flexWrap: 'wrap' as const }}>
                 {stats.map((stat, i) => (
@@ -763,17 +773,36 @@ function renderSlot(slot: UISlot, css: MaterializedTokens): React.ReactNode {
     if (componentType === 'exception-queue') {
         const items = (data.items as Array<{ id: string; control: string; status: string; variance: string; owner: string }> | undefined) ?? [];
         const statusBorder = (status: string) => {
-            if (status === 'warning') return css.palette.borderWarning;
-            if (status === 'danger') return css.palette.borderDanger;
-            if (status === 'success') return css.palette.borderSuccess;
+            if (status === 'warning') {
+return css.palette.borderWarning;
+}
+
+            if (status === 'danger') {
+return css.palette.borderDanger;
+}
+
+            if (status === 'success') {
+return css.palette.borderSuccess;
+}
+
             return css.palette.borderVisible;
         };
         const statusColor = (status: string) => {
-            if (status === 'warning') return css.palette.borderWarning;
-            if (status === 'danger') return css.palette.borderDanger;
-            if (status === 'success') return css.palette.borderSuccess;
+            if (status === 'warning') {
+return css.palette.borderWarning;
+}
+
+            if (status === 'danger') {
+return css.palette.borderDanger;
+}
+
+            if (status === 'success') {
+return css.palette.borderSuccess;
+}
+
             return css.palette.textSecondary;
         };
+
         return (
             <div style={{ ...common, overflow: 'hidden' }}>
                 <div style={{ padding: `${css.spacing * 0.6}px ${css.spacing}px`, fontFamily: 'ui-monospace, monospace', fontSize: css.labelSize, textTransform: 'uppercase' as const, letterSpacing: '0.07em', color: css.palette.textMuted, borderBottom: `1px solid ${css.palette.borderSubtle}` }}>
@@ -805,6 +834,7 @@ function renderSlot(slot: UISlot, css: MaterializedTokens): React.ReactNode {
 
     if (componentType === 'audit-trail') {
         const events = (data.events as Array<{ time: string; actor: string; action: string; note: string }> | undefined) ?? [];
+
         return (
             <div style={{ ...common, padding: css.spacing }}>
                 <div style={{ fontFamily: 'ui-monospace, monospace', fontSize: css.labelSize, textTransform: 'uppercase' as const, letterSpacing: '0.07em', color: css.palette.textMuted, marginBottom: css.spacing * 0.75, paddingBottom: css.spacing * 0.5, borderBottom: `1px solid ${css.palette.borderSubtle}` }}>
@@ -831,11 +861,13 @@ function renderSlot(slot: UISlot, css: MaterializedTokens): React.ReactNode {
     if (componentType === 'approval-chain') {
         const steps = (data.steps as string[] | undefined) ?? [];
         const current = (data.current as number | undefined) ?? 0;
+
         return (
             <div style={{ display: 'flex', alignItems: 'center', gap: 0, flexWrap: 'nowrap' as const }}>
                 {steps.map((step, i) => {
                     const isActive = i === current;
                     const isDone = i < current;
+
                     return (
                         <div key={i} style={{ display: 'flex', alignItems: 'center' }}>
                             <div style={{
@@ -865,6 +897,7 @@ function renderSlot(slot: UISlot, css: MaterializedTokens): React.ReactNode {
 
     if (componentType === 'patient-summary') {
         const alerts = (data.alerts as string[] | undefined) ?? [];
+
         return (
             <div style={{ ...common, padding: Math.max(css.spacing * 2, css.spacing + 12) }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: css.spacing }}>
@@ -902,11 +935,21 @@ function renderSlot(slot: UISlot, css: MaterializedTokens): React.ReactNode {
     if (componentType === 'medication-list') {
         const items = (data.items as Array<{ name: string; status: string; note: string }> | undefined) ?? [];
         const statusBorder = (status: string) => {
-            if (status === 'warning') return css.palette.borderWarning;
-            if (status === 'danger') return css.palette.borderDanger;
-            if (status === 'success') return css.palette.borderSuccess;
+            if (status === 'warning') {
+return css.palette.borderWarning;
+}
+
+            if (status === 'danger') {
+return css.palette.borderDanger;
+}
+
+            if (status === 'success') {
+return css.palette.borderSuccess;
+}
+
             return css.palette.borderVisible;
         };
+
         return (
             <div style={{ ...common, overflow: 'hidden' }}>
                 <div style={{ padding: `${css.spacing * 0.6}px ${css.spacing}px`, fontFamily: 'ui-monospace, monospace', fontSize: css.labelSize, textTransform: 'uppercase' as const, letterSpacing: '0.07em', color: css.palette.textMuted, borderBottom: `1px solid ${css.palette.borderSubtle}` }}>
@@ -932,11 +975,21 @@ function renderSlot(slot: UISlot, css: MaterializedTokens): React.ReactNode {
     if (componentType === 'care-timeline') {
         const events = (data.events as Array<{ time: string; type: string; text: string }> | undefined) ?? [];
         const dotColor = (type: string) => {
-            if (type === 'warning') return css.palette.borderWarning;
-            if (type === 'danger') return css.palette.borderDanger;
-            if (type === 'success') return css.palette.borderSuccess;
+            if (type === 'warning') {
+return css.palette.borderWarning;
+}
+
+            if (type === 'danger') {
+return css.palette.borderDanger;
+}
+
+            if (type === 'success') {
+return css.palette.borderSuccess;
+}
+
             return css.palette.borderVisible;
         };
+
         return (
             <div style={{ ...common, padding: css.spacing }}>
                 <div style={{ fontFamily: 'ui-monospace, monospace', fontSize: css.labelSize, textTransform: 'uppercase' as const, letterSpacing: '0.07em', color: css.palette.textMuted, marginBottom: css.spacing * 0.75, paddingBottom: css.spacing * 0.5, borderBottom: `1px solid ${css.palette.borderSubtle}` }}>
@@ -976,17 +1029,36 @@ function renderSlot(slot: UISlot, css: MaterializedTokens): React.ReactNode {
     if (componentType === 'vitals-bar') {
         const readings = (data.readings as Array<{ label: string; value: string; status: string }> | undefined) ?? [];
         const vitalBg = (status: string) => {
-            if (status === 'warning') return css.palette.warning;
-            if (status === 'danger') return css.palette.danger;
-            if (status === 'success') return css.palette.success;
+            if (status === 'warning') {
+return css.palette.warning;
+}
+
+            if (status === 'danger') {
+return css.palette.danger;
+}
+
+            if (status === 'success') {
+return css.palette.success;
+}
+
             return css.surface;
         };
         const vitalBorder = (status: string) => {
-            if (status === 'warning') return css.palette.borderWarning;
-            if (status === 'danger') return css.palette.borderDanger;
-            if (status === 'success') return css.palette.borderSuccess;
+            if (status === 'warning') {
+return css.palette.borderWarning;
+}
+
+            if (status === 'danger') {
+return css.palette.borderDanger;
+}
+
+            if (status === 'success') {
+return css.palette.borderSuccess;
+}
+
             return css.border;
         };
+
         return (
             <div style={{ display: 'flex', gap: css.spacing, flexWrap: 'wrap' as const }}>
                 {readings.map((reading, i) => (
@@ -1018,13 +1090,23 @@ function renderSlot(slot: UISlot, css: MaterializedTokens): React.ReactNode {
     if (componentType === 'position-grid') {
         const rows = (data.rows as Array<{ id: string; book: string; signal: string; pnl: string; move: string; desk: string }> | undefined) ?? [];
         const signalColor = (signal: string) => {
-            if (signal === 'warning') return css.palette.borderWarning;
-            if (signal === 'danger') return css.palette.borderDanger;
-            if (signal === 'success') return css.palette.borderSuccess;
+            if (signal === 'warning') {
+return css.palette.borderWarning;
+}
+
+            if (signal === 'danger') {
+return css.palette.borderDanger;
+}
+
+            if (signal === 'success') {
+return css.palette.borderSuccess;
+}
+
             return css.palette.textSecondary;
         };
         const pnlColor = (pnl: string) => pnl.startsWith('+') ? css.palette.borderSuccess : pnl.startsWith('-') ? css.palette.borderDanger : css.text;
         const compactFontSize = Math.max(css.fontSize - 1, 10.5);
+
         return (
             <div style={{ ...common, overflow: 'hidden' }}>
                 <table className="w-full border-collapse" style={{ fontSize: compactFontSize }}>
@@ -1059,6 +1141,7 @@ function renderSlot(slot: UISlot, css: MaterializedTokens): React.ReactNode {
     if (componentType === 'metric-ticker') {
         const status = String(data.status ?? 'default');
         const deltaColor = status === 'success' ? css.palette.borderSuccess : status === 'warning' ? css.palette.borderWarning : status === 'danger' ? css.palette.borderDanger : css.palette.textSecondary;
+
         return (
             <div style={{ ...common, padding: css.spacing, minWidth: 100 }}>
                 <div style={{ fontFamily: 'ui-monospace, monospace', fontSize: css.labelSize, textTransform: 'uppercase' as const, letterSpacing: '0.07em', color: css.palette.textMuted }}>
@@ -1082,6 +1165,7 @@ function renderSlot(slot: UISlot, css: MaterializedTokens): React.ReactNode {
             : value >= threshold * 0.8
               ? css.palette.borderWarning
               : css.palette.borderSuccess;
+
         return (
             <div style={{ ...common, padding: css.spacing }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: css.spacing * 0.5 }}>
@@ -1119,6 +1203,7 @@ function renderSlot(slot: UISlot, css: MaterializedTokens): React.ReactNode {
             width: '100%',
             color: css.text,
         };
+
         return (
             <div style={{ ...common, padding: css.spacing }}>
                 <div style={{ fontFamily: 'ui-monospace, monospace', fontSize: css.labelSize, textTransform: 'uppercase' as const, letterSpacing: '0.07em', color: css.palette.textMuted, marginBottom: css.spacing * 0.75, paddingBottom: css.spacing * 0.5, borderBottom: `1px solid ${css.palette.borderSubtle}` }}>

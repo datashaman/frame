@@ -1,4 +1,4 @@
-import type { Rule, UIComponentType, UIScreen, UIScreenDelta } from './types';
+import type { ConstraintContext, Rule, UIComponentType, UIScreen, UIScreenDelta, UISlot } from './types';
 
 export const projects = {
     enterprise: {
@@ -339,8 +339,8 @@ export function buildRuleset(projectId: string, personaId: string, density: stri
     ];
 }
 
-export function componentTypeToContext(type: UIComponentType): NonNullable<import('./types').ConstraintContext['component']> {
-    const map: Record<UIComponentType, NonNullable<import('./types').ConstraintContext['component']>> = {
+export function componentTypeToContext(type: UIComponentType): NonNullable<ConstraintContext['component']> {
+    const map: Record<UIComponentType, NonNullable<ConstraintContext['component']>> = {
         'card': 'card', 'button': 'button', 'input': 'input',
         'panel': 'panel', 'badge': 'badge', 'table': 'table',
         'exception-queue': 'table', 'audit-trail': 'panel',
@@ -350,6 +350,7 @@ export function componentTypeToContext(type: UIComponentType): NonNullable<impor
         'position-grid': 'table', 'metric-ticker': 'card',
         'risk-gauge': 'panel', 'order-entry': 'input',
     };
+
     return map[type] ?? 'panel';
 }
 
@@ -650,14 +651,18 @@ export function defaultSlotData(type: UIComponentType): Record<string, unknown> 
         'risk-gauge': { label: '—', value: 0, threshold: 100 },
         'order-entry': { symbol: '—', side: 'buy', quantity: '0', type: 'limit', price: '0.00' },
     };
+
     return defaults[type] ?? {};
 }
 
 export function mergeScreenDelta(current: UIScreen, delta: UIScreenDelta, project: keyof typeof projects): UIScreen {
-    if (!delta.regions) return current;
+    if (!delta.regions) {
+return current;
+}
 
     const preset = projectScreens[project];
-    const presetSlotsById = new Map<string, import('./types').UISlot>();
+    const presetSlotsById = new Map<string, UISlot>();
+
     for (const region of preset.regions) {
         for (const slot of region.slots) {
             presetSlotsById.set(slot.id, slot);
@@ -668,6 +673,7 @@ export function mergeScreenDelta(current: UIScreen, delta: UIScreenDelta, projec
         ...region,
         slots: region.slots.map((slot) => {
             const presetSlot = presetSlotsById.get(slot.id);
+
             return {
                 ...slot,
                 data: presetSlot ? presetSlot.data : defaultSlotData(slot.componentType),
