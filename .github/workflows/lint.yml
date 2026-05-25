@@ -1,24 +1,16 @@
-name: linter
+name: lint
 
 on:
-  push:
-    branches:
-      - develop
-      - main
-      - master
-      - workos
   pull_request:
     branches:
-      - develop
       - main
-      - master
-      - workos
 
-permissions:
-  contents: write
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
 
 jobs:
-  quality:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -26,7 +18,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.4'
+          php-version: '8.5'
 
       - name: Install Dependencies
         run: |
@@ -34,16 +26,7 @@ jobs:
           npm install
 
       - name: Run Pint
-        run: composer lint
-
-      - name: Format Frontend
-        run: npm run format
+        run: composer lint:check
 
       - name: Lint Frontend
-        run: npm run lint
-
-      # - name: Commit Changes
-      #   uses: stefanzweifel/git-auto-commit-action@v7
-      #   with:
-      #     commit_message: fix code style
-      #     commit_options: '--no-verify'
+        run: npm run lint:check
